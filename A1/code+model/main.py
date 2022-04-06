@@ -9,14 +9,15 @@ import cv2
 import torch.nn.functional as F
 from glob import glob
 import pandas
-from google.colab.patches import cv2_imshow
+# from google.colab.patches import cv2_imshow
 import utils
 
 device = 'cuda:0'
 
 class MVDataset(Dataset):
-    def __init__(self, method=None):
-        self.root = '/content/gdrive/My Drive/homeworks/dgms/datasets/toothbrush/' #Change this path
+    def __init__(self, method=None, data_name='bottle', folder_name="good"):
+        self.data_name = data_name
+        self.root = f'../data/{self.data_name}/' #Change this path
         self.x_data = []
         self.y_data = []
 
@@ -25,12 +26,13 @@ class MVDataset(Dataset):
             self.img_path = sorted(glob(self.root + '*.png'))
  
         elif method == 'test':
-            self.root = self.root + 'test/defective/'
+            self.root = self.root + 'test/' + folder_name + '/'
             self.img_path = sorted(glob(self.root + '*.png'))
 
+        print("Load data")
         for i in tqdm.tqdm(range(len(self.img_path))):
             img = cv2.imread(self.img_path[i], cv2.IMREAD_COLOR)
-            print(self.img_path[i])
+            # print(self.img_path[i])
             b, g, r = cv2.split(img)
             img = cv2.merge([r, g, b])
             img = cv2.resize(img, dsize=(256, 256))
@@ -49,14 +51,15 @@ class MVDataset(Dataset):
 
 
 class Trainer(object):
-    def __init__(self, epochs, batch_size, lr):
+    def __init__(self, data_name, epochs, batch_size, lr):
         self.epochs = epochs
         self.batch_size = batch_size
         self.learning_rate = lr
         self._build_model()
         self.binary_cross_entropy = torch.nn.BCELoss()
 
-        dataset = MVDataset(method='train')
+        self.data_name = data_name
+        dataset = MVDataset(method='train', data_name=data_name)
         self.root = dataset.root
         self.dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr = self.learning_rate, betas=(0.9, 0.999))
@@ -77,32 +80,50 @@ class Trainer(object):
         return recon_loss + 0.000001 * kldivergence
 
     def train(self):
-        date = '20211017'
+        date = '20220331'
         for epoch in tqdm.tqdm(range(self.epochs + 1)):
-            if epoch % 200 == 0:
-                torch.save(self.net.state_dict(), "_".join(['/content/gdrive/My Drive/homeworks/dgms/datasets/toothbrush/model', str(epoch), '.pth'])) #Change this path
+            if epoch == 10 or epoch == 500:
+                torch.save(self.net.state_dict(), "_".join(['../model/model', self.data_name,  str(epoch) + "epoch.pth"])) #Change this path
+
+            total_loss = 0
 
             for batch_idx, samples in enumerate(self.dataloader):
                 x_train, y_train = samples
                 x_train, y_train = x_train.to(device), y_train.to(device)
-             
+        
+                # todo : implement the training code
+                recon_x, latent_mu, latent_logvar = self.net(x_train)
+                loss = self.vae_loss(recon_x, x_train, latent_mu, latent_logvar)
+                
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                total_loss += loss
+                
+            print(f"-------------------------------------")
+            print(f"epoch : {epoch}")
+            print(f"loss  : {total_loss}")
+            
 
         print('Finish training.')
 
 
 class Tester(object):
-    def __init__(self, batch_size):
+    def __init__(self, batch_size, model_name, data_name='bottle', folder_name="broken"):
         self.batch_size = batch_size
         self._build_model()
 
-        dataset = MVDataset(method='test')
+        self.folder_name = folder_name
+        dataset = MVDataset(method='test', data_name=data_name, folder_name=folder_name)
         self.root = dataset.root
         self.dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
         self.datalen = dataset.__len__()
         self.mse_all_img = []
 
         # Load of pretrained_weight file
-        weight_PATH = '/content/gdrive/My Drive/homeworks/dgms/datasets/toothbrush/model.pth' #Change this path
+        self.model_name = model_name
+        weight_PATH = f'../model/{self.model_name}.pth' #Change this path
         self.net.load_state_dict(torch.load(weight_PATH))
 
         print("Testing...")
@@ -112,7 +133,7 @@ class Tester(object):
         self.net = net.to(device)
         self.net.eval()
 
-        print('Finish build model.')
+        print('Finish model initialization.')
 
     def test(self):
         for batch_idx, samples in enumerate(self.dataloader):
@@ -124,20 +145,22 @@ class Tester(object):
 
             abnomal = utils.compare_images_colab(x_test2[0].clone().permute(1, 2, 0).cpu().detach().numpy(), out2[0].clone().permute(1, 2, 0).cpu().detach().numpy(), None, 0.2)   
 
-            cv2.imwrite('test_%d_ori.png' % batch_idx, cv2.cvtColor(x_test2[0].clone().permute(1, 2, 0).cpu().detach().numpy(), cv2.COLOR_RGB2BGR))
-            cv2.imwrite('test_%d_gen.png' % batch_idx, cv2.cvtColor(out2[0].clone().permute(1, 2, 0).cpu().detach().numpy(), cv2.COLOR_RGB2BGR))
-            cv2.imwrite('test_%d_diff.png' % batch_idx, abnomal)
+            directory = f"../{self.model_name}_output/"
+            utils.mkdirs(directory)
+            cv2.imwrite(directory + f'{self.folder_name}_test_{batch_idx}_ori.png', cv2.cvtColor(x_test2[0].clone().permute(1, 2, 0).cpu().detach().numpy(), cv2.COLOR_RGB2BGR))
+            cv2.imwrite(directory + f'{self.folder_name}_test_{batch_idx}_gen.png', cv2.cvtColor(out2[0].clone().permute(1, 2, 0).cpu().detach().numpy(), cv2.COLOR_RGB2BGR))
+            cv2.imwrite(directory + f'{self.folder_name}_test_{batch_idx}_diff.png', abnomal)
 
 def main():
 
-    epochs = 1500
+    epochs = 500
     batchSize = 1
     learningRate = 1e-4
 
-    #trainer = Trainer(epochs, batchSize, learningRate)
-    #trainer.train()
+    trainer = Trainer("bottle", epochs, batchSize, learningRate)
+    trainer.train()
 
-    tester = Tester(batchSize)
+    tester = Tester(batchSize, "model_toothbrush_500epoch0.00001", "toothbrush", "defective")
     tester.test()
 
 if __name__ == '__main__':
