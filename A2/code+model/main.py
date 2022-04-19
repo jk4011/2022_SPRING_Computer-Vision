@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader
 import cv2
 import glob
 import pandas
-from google.colab.patches import cv2_imshow
 from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
@@ -76,7 +75,7 @@ class Trainer(object):
         self.binary_cross_entropy = torch.nn.BCELoss()
         self.p_loss = torch.nn.L1Loss()
         transforms_ = [transforms.Resize((128, 128), Image.BICUBIC), transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-        dataset = FaceDataset(root='/content/gdrive/My Drive/homeworks/dgms_ass2/data/train', method='train', transforms_=transforms_) #Change this path
+        dataset = FaceDataset(root='../data/train', method='train', transforms_=transforms_) #Change this path
         self.root = dataset.root
 
         self.dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
@@ -99,7 +98,7 @@ class Trainer(object):
     def train(self):
         date = '20211017'
         for epoch in tqdm.tqdm(range(self.epochs + 1)):
-            torch.save(self.gnet.state_dict(), "_".join(['/content/gdrive/My Drive/homeworks/dgms_ass2/code+model/model', str(epoch), '.pth'])) #Change this path
+            torch.save(self.gnet.state_dict(), "_".join(['./model', str(epoch), '.pth'])) #Change this path
 
             for batch_idx, (imgs, masked_imgs, masked_parts) in enumerate(self.dataloader):
                 Tensor = torch.cuda.FloatTensor
@@ -130,7 +129,7 @@ class Tester(object):
     def __init__(self, batch_size):
         self._build_model()
         transforms_ = [transforms.Resize((128, 128), Image.BICUBIC), transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-        dataset = FaceDataset(root='/content/gdrive/My Drive/homeworks/dgms_ass2/data/test', method='test', transforms_=transforms_)
+        dataset = FaceDataset(root='../data/test', method='test', transforms_=transforms_)
         self.root = dataset.root
         self.test_dataloader = DataLoader(dataset, batch_size=6, shuffle=False)
 
@@ -139,7 +138,7 @@ class Tester(object):
     def _build_model(self):
         gnet = Generator()
         self.gnet = gnet.to(device)
-        self.gnet.load_state_dict(torch.load('/content/gdrive/My Drive/homeworks/dgms_ass2/code+model/model.pth')) #Change this path
+        self.gnet.load_state_dict(torch.load('./model.pth')) #Change this path
         self.gnet.eval()
         print('Finish build model.')
 
@@ -157,7 +156,7 @@ class Tester(object):
 
         # Save sample
         sample = torch.cat((masked_samples.data, filled_samples.data, samples.data), -2)
-        save_image(sample, "/content/gdrive/My Drive/homeworks/dgms_ass2/code+model/test.png", nrow=6, normalize=True)   #Change this path
+        save_image(sample, "../test.png", nrow=6, normalize=True)   #Change this path
 
 def main():
 
