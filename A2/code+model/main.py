@@ -14,16 +14,13 @@ from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
 from torch.autograd import Variable
+import matplotlib.pyplot as plt
+
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 device = 'cuda:0'
 
-def weights_init_normal(m):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1:
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find("BatchNorm2d") != -1:
-        nn.init.normal_(m.weight.data, 1.0, 0.02)
-        nn.init.constant_(m.bias.data, 0.0)
 
 class FaceDataset(Dataset):
     def __init__(self, root, transforms_=None, img_size=128, mask_size=64, method="train"):
@@ -66,6 +63,15 @@ class FaceDataset(Dataset):
     def __len__(self):
         return len(self.files)
 
+
+def weights_init_normal(m):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1:
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find("BatchNorm2d") != -1:
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
+
 class Trainer(object):
     def __init__(self, epochs, batch_size, lr):
         self.epochs = epochs
@@ -98,7 +104,8 @@ class Trainer(object):
     def train(self):
         date = '20211017'
         for epoch in tqdm.tqdm(range(self.epochs + 1)):
-            torch.save(self.gnet.state_dict(), "_".join(['./model', str(epoch), '.pth'])) #Change this path
+            if epoch % 10 == 0:
+                torch.save(self.gnet.state_dict(), f'./model_gan_lamb_{str(epoch)}.pth') #Change this path
 
             for batch_idx, (imgs, masked_imgs, masked_parts) in enumerate(self.dataloader):
                 Tensor = torch.cuda.FloatTensor
@@ -112,17 +119,43 @@ class Trainer(object):
                 masked_imgs = Variable(masked_imgs.type(Tensor))
                 masked_parts = Variable(masked_parts.type(Tensor))
 
-                self.optimizer_G.zero_grad()
 
-                # Generate a batch of images
-                gen_parts = self.gnet(masked_imgs)
+                # Generater loss
+                # minimize - log(1-D(G(z)))
+                g_output = self.gnet(masked_imgs)
+                d_output_fake = self.dnet(masked_parts)
 
-                g_loss = self.p_loss(gen_parts, masked_parts)
+                self.optimizer_G.zero_grad() 
 
-                g_loss.backward()
+                l1_loss = self.p_loss(g_output, masked_parts)
+
+                g_loss = - self.binary_cross_entropy(valid, 1 - d_output_fake)
+
+                lamb = 0.5
+                loss = g_loss * lamb + l1_loss #
+                loss.backward()
+
                 self.optimizer_G.step()
 
-                print("[Epoch %d/%d] [Batch %d/%d]" % (epoch, self.epochs+1, batch_idx, len(self.dataloader)))
+
+                # Discriminator loss
+                # minimize - log(D(x)) + log(1-D(G(z)))
+                g_output = self.gnet(masked_imgs)
+                d_output_real = self.dnet(g_output)
+                d_output_fake = self.dnet(masked_parts)
+                
+                self.optimizer_D.zero_grad()
+
+                d_loss_real = - self.binary_cross_entropy(valid, d_output_real)
+                d_loss_real.backward()
+
+                d_loss_fake = self.binary_cross_entropy(fake, d_output_fake)
+                d_loss_fake.backward()
+
+                self.optimizer_D.step()
+
+
+                # print("[Epoch %d/%d] [Batch %d/%d]" % (epoch, self.epochs+1, batch_idx, len(self.dataloader)))
 
 
 class Tester(object):
@@ -138,7 +171,7 @@ class Tester(object):
     def _build_model(self):
         gnet = Generator()
         self.gnet = gnet.to(device)
-        self.gnet.load_state_dict(torch.load('./model.pth')) #Change this path
+        self.gnet.load_state_dict(torch.load('./model_gan_lamb_50.pth')) #Change this path
         self.gnet.eval()
         print('Finish build model.')
 
@@ -160,12 +193,12 @@ class Tester(object):
 
 def main():
 
-    epochs = 200
-    batchSize = 32
+    epochs = 100
+    batchSize = 64
     learningRate = 0.0002
 
-    #trainer = Trainer(epochs, batchSize, learningRate)
-    #trainer.train()
+    # trainer = Trainer(epochs, batchSize, learningRate)
+    # trainer.train()
 
     tester = Tester(batchSize)
     tester.test()
